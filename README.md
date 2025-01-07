@@ -6,7 +6,8 @@ tech stack used -
 *  blender3d for 3d work
 
 libraries used -
-*  numpy
+*  mediapipe
 *  bpy
 *  opencv
 *  socket
+*  math
