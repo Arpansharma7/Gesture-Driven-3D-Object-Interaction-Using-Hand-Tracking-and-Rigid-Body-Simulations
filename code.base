@@ -15,7 +15,7 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 cap = cv2.VideoCapture(0)
 
-print("Starting webcam and sending hand position... Press ESC to exit.")
+print("Starting. Press ESC to exit.")
 
 while True:
     success, image = cap.read()
@@ -58,7 +58,6 @@ while True:
             thickness=2,
         )
 
-        # Optional: Label the bounding box
         cv2.putText(
             image,
             "Hand Detected",
