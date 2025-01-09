@@ -1,79 +1,85 @@
-import bpy
+import cv2
+import mediapipe as mp
 import socket
-import threading
-#creating a link between main code and blender
-server_ip = "127.0.0.1" 
+import math
+
+# MediaPipe Setup
+mp_hands = mp.solutions.hands
+hands = mp_hands.Hands(static_image_mode=False, max_num_hands=1, min_detection_confidence=0.7)
+
+# Socket Setup
+server_ip = "127.0.0.1"  # used for Localhosting
 server_port = 12347
-buffer_size = 1024
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-# use the name which is of your object inside Blender
-target_object_name = "Cube" 
-target_object = bpy.data.objects.get(target_object_name)
+cap = cv2.VideoCapture(0)
 
-if not target_object:
-    raise ValueError(f"Object '{target_object_name}' not found in Blender.")
+print("Starting webcam and sending hand position... Press ESC to exit.")
 
-# for Smoother movement
-last_position = [0.0, 0.0, 0.0]
-velocity = [0.0, 0.0, 0.0] 
-smooth_factor = 0.1  
-filter_factor = 0.3  
+while True:
+    success, image = cap.read()
+    if not success:
+        print("Webcam not detected or error in capture!")
+        continue
 
-# Object scale parameters
-min_scale = 0.1  
-max_scale = 2.0  
+    image = cv2.flip(image, 1)  # Flip image horizontally for mirror effect
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  # Convert to RGB for MediaPipe
+    results = hands.process(image_rgb)
 
-z_threshold = 0.1  
-
-def low_pass_filter(new_value, previous_value, alpha):
-    return previous_value + alpha * (new_value - previous_value)
-
-def update_object_properties(data):
-    global last_position, velocity
-    try:
-        wrist_data, finger_spread = data.split("|")
-        x, y, z = map(float, wrist_data.split(","))
-        finger_distance = float(finger_spread)
+    if results.multi_hand_landmarks:
+        hand_landmarks = results.multi_hand_landmarks[0]
         
-        smooth_x = low_pass_filter(x * 10 - 5, last_position[0], filter_factor)
-        smooth_y = low_pass_filter(y * 10 - 5, last_position[1], filter_factor)
-        smooth_z = low_pass_filter(z * 10 - 0, last_position[2], filter_factor)
+        # Wrist co-ordinates (x, y, z)
+        wrist = hand_landmarks.landmark[0]
 
-        velocity[0] = smooth_x - last_position[0]
-        velocity[1] = smooth_y - last_position[1]
-        velocity[2] = smooth_z - last_position[2]
+        thumb_tip = hand_landmarks.landmark[4]
+        index_tip = hand_landmarks.landmark[8]
+        finger_distance = math.dist([thumb_tip.x, thumb_tip.y], [index_tip.x, index_tip.y])
 
-        target_object.location = (
-            smooth_x + velocity[0] * smooth_factor,
-            smooth_y + velocity[1] * smooth_factor,
-            smooth_z + velocity[2] * smooth_factor,
+        wrist_data = f"{wrist.x:.5f},{wrist.y:.5f},{wrist.z:.5f}|{finger_distance:.5f}"
+        sock.sendto(wrist_data.encode(), (server_ip, server_port))
+
+        img_height, img_width, _ = image.shape
+        x_min = min([lm.x for lm in hand_landmarks.landmark]) * img_width
+        y_min = min([lm.y for lm in hand_landmarks.landmark]) * img_height
+        x_max = max([lm.x for lm in hand_landmarks.landmark]) * img_width
+        y_max = max([lm.y for lm in hand_landmarks.landmark]) * img_height
+
+        # Draw rectangle
+        cv2.rectangle(
+            image,
+            (int(x_min), int(y_min)),
+            (int(x_max), int(y_max)),
+            color=(0, 255, 0),  # Green color
+            thickness=2,
         )
 
-        if abs(velocity[2]) > z_threshold:
-            print("Back-and-forth motion detected!")
+        # Label bounding box
+        cv2.putText(
+            image,
+            "Hand Detected",
+            (int(x_min), int(y_min) - 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 255, 0),
+            1,
+            cv2.LINE_AA,
+        )
 
-        scale_factor = min(max_scale, max(min_scale, finger_distance * 10))
-        target_object.scale = (scale_factor, scale_factor, scale_factor)
+    if results.multi_hand_landmarks:
+        for hand_landmarks in results.multi_hand_landmarks:
+            mp.solutions.drawing_utils.draw_landmarks(
+                image, hand_landmarks, mp_hands.HAND_CONNECTIONS
+            )
 
-        # Update last position
-        last_position = [smooth_x, smooth_y, smooth_z]
+    # Show the image with hand tracking
+    cv2.imshow("Hand Tracking", image)
 
-    except Exception as e:
-        print(f"Error updating object properties: {e}")
+    # Break the loop if ESC is pressed
+    if cv2.waitKey(1) & 0xFF == 27:  # ESC key
+        print("Exiting...")
+        break
 
-def socket_listener():
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server_socket:
-        server_socket.bind((server_ip, server_port))
-        print(f"Listening on {server_ip}:{server_port}...")
-        while True:
-            try:
-                data, _ = server_socket.recvfrom(buffer_size)
-                update_object_properties(data.decode())
-            except Exception as e:
-                print(f"Socket error: {e}")
-                break
-
-listener_thread = threading.Thread(target=socket_listener, daemon=True)
-listener_thread.start()
-
-print("started")
+cap.release()
+cv2.destroyAllWindows()
+sock.close()
