@@ -15,10 +15,16 @@ if not target_object:
 
 
 last_position = [0.0, 0.0, 0.0]
-hand_data_scaling_factor = 70  
-smooth_factor = 0.1  
-filter_factor = 0.2  
+hand_data_scaling_factor = 200  # Increased scaling factor (was 70)
+smooth_factor = 0.3  # Increased smoothing (was 0.1)
+filter_factor = 0.5  # Increased filter responsiveness (was 0.2)
 
+# Define movement boundaries to prevent object from moving too far
+movement_bounds = {
+    'x': (-10, 10),  # min, max values for x
+    'y': (-10, 10),  # min, max values for y
+    'z': (-5, 15)    # min, max values for z
+}
 
 def low_pass_filter(new_value, previous_value, alpha):
     return previous_value + alpha * (new_value - previous_value)
@@ -27,27 +33,43 @@ def low_pass_filter(new_value, previous_value, alpha):
 def update_object_properties(data):
     global last_position
     try:
-        
+        # Parse incoming data
         wrist_data, finger_spread = data.split("|")
         x, y, z = map(float, wrist_data.split(","))
-
         
+        # Print raw data for debugging
         print(f"Raw Data: X={x}, Y={y}, Z={z}")
 
+        # Map hand coordinates to a more usable range
+        # Invert y to make movement more intuitive
+        # Center coordinates around 0.5 for better center positioning
+        x = (x - 0.5) * hand_data_scaling_factor
+        y = (0.5 - y) * hand_data_scaling_factor  # Inverted y for natural movement
+        z = z * hand_data_scaling_factor * 2  # More vertical range
         
-        smooth_x = x * hand_data_scaling_factor
-        smooth_y = y * hand_data_scaling_factor
-        smooth_z = z * hand_data_scaling_factor
-
+        # Apply smoothing with improved filter factor
+        smooth_x = low_pass_filter(x, last_position[0], filter_factor)
+        smooth_y = low_pass_filter(y, last_position[1], filter_factor)
+        smooth_z = low_pass_filter(z, last_position[2], filter_factor)
         
-        smooth_x = low_pass_filter(smooth_x, last_position[0], filter_factor)
-        smooth_y = low_pass_filter(smooth_y, last_position[1], filter_factor)
-        smooth_z = low_pass_filter(smooth_z, last_position[2], filter_factor)
-
+        # Clamp values to prevent extreme movements
+        smooth_x = max(movement_bounds['x'][0], min(movement_bounds['x'][1], smooth_x))
+        smooth_y = max(movement_bounds['y'][0], min(movement_bounds['y'][1], smooth_y))
+        smooth_z = max(movement_bounds['z'][0], min(movement_bounds['z'][1], smooth_z))
         
+        # Update object position
         target_object.location = (smooth_x, smooth_y, smooth_z)
-
         
+        # Optional: Scale or rotate based on finger spread
+        finger_spread_value = float(finger_spread)
+        if finger_spread_value < 0.3:  # Fingers close together
+            scale_factor = 1.0
+        else:  # Fingers spread apart
+            scale_factor = 1.0 + finger_spread_value
+        
+        target_object.scale = (scale_factor, scale_factor, scale_factor)
+        
+        # Store current position for next update
         last_position = [smooth_x, smooth_y, smooth_z]
 
     except Exception as e:
