@@ -77,4 +77,4 @@ Anyone can use and contribute
 
 --------Author--------
 
-Arpan Sharm
+Arpan Sharma
